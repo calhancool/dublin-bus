@@ -93,8 +93,15 @@ if run_routing and orig_lat is not None:
             dest_node = ox.distance.nearest_nodes(G_safe, X=dest_lon, Y=dest_lat)
             route = nx.shortest_path(G_safe, orig_node, dest_node, weight='length')
             
-            # Using built-in CartoDB positron tiles which are completely free and require no keys
-            route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles="CartoDB positron")
+            # Create base map with no default template tiles, then add pure OpenStreetMap tiles explicitly
+            route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles=None)
+            
+            folium.TileLayer(
+                'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                name='OpenStreetMap',
+                max_zoom=19,
+            ).add_to(route_map)
             
             route_coords = [(G_safe.nodes[node]['y'], G_safe.nodes[node]['x']) for node in route]
             
