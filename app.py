@@ -10,9 +10,6 @@ st.set_page_config(page_title="Dublin Bus Safe Router", layout="wide")
 st.title("🚌 Dublin Bus Bridge-Safe Navigation")
 st.write("Route planner tailored for mechanics, test drivers, and depot vehicle transfers.")
 
-# Directly paste your Mapbox API key here inside the quotes:
-MAPBOX_TOKEN = "cb1_4esz_1_c6e8c12681810caf28827d87"
-
 if "route_map" not in st.session_state:
     st.session_state.route_map = None
 if "route_message" not in st.session_state:
@@ -96,12 +93,8 @@ if run_routing and orig_lat is not None:
             dest_node = ox.distance.nearest_nodes(G_safe, X=dest_lon, Y=dest_lat)
             route = nx.shortest_path(G_safe, orig_node, dest_node, weight='length')
             
-            # Use Mapbox tiles with the token embedded directly
-            tile_url = f"https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/256/{{z}}/{{x}}/{{y}}?access_token={MAPBOX_TOKEN}"
-            attr = '© <a href="https://www.mapbox.com/">Mapbox</a>'
-
-            route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles=None)
-            folium.TileLayer(tile_url, attr=attr, max_zoom=19).add_to(route_map)
+            # Using Esri World Street Map (free, high quality, requires no keys)
+            route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles="Esri.WorldStreetMap")
             
             route_coords = [(G_safe.nodes[node]['y'], G_safe.nodes[node]['x']) for node in route]
             
