@@ -4,8 +4,6 @@ import networkx as nx
 import folium
 from streamlit_folium import st_folium
 from streamlit_geolocation import streamlit_geolocation
-from streamlit_searchbox import st_searchbox
-import requests
 import re
 
 st.set_page_config(page_title="Dublin Bus Safe Router", layout="wide")
@@ -53,38 +51,27 @@ def load_routing_graph():
 with st.spinner("Loading Dublin road network and checking low bridges..."):
     G_safe = load_routing_graph()
 
-# Autocomplete search function using Photon API (biased around Dublin)
-def search_dublin_locations(searchterm: str):
-    if not searchterm or len(searchterm) < 2:
-        return []
-    try:
-        url = f"https://photon.komoot.io/api/?q={searchterm}, Dublin&limit=5"
-        response = requests.get(url, timeout=2)
-        data = response.json()
-        suggestions = []
-        for feature in data.get("features", []):
-            props = feature.get("properties", {})
-            name = props.get("name", "")
-            street = props.get("street", "")
-            suburb = props.get("suburb", "")
-            
-            # Build a readable label
-            parts = [p for p in [name, street, suburb] if p]
-            label = ", ".join(dict.fromkeys(parts)) # remove duplicates
-            
-            # Get coordinates [longitude, latitude]
-            coords = feature.get("geometry", {}).get("coordinates", [])
-            if len(coords) == 2:
-                suggestions.append((label, (coords[1], coords[0]))) # returns (Display Label, (lat, lon))
-        return suggestions
-    except Exception:
-        return []
+# Popular Dublin locations and depots for instant selection or fallback typing
+POPULAR_LOCATIONS = {
+    "-- Select or type below --": None,
+    "O'Connell Street, Dublin": (53.3498, -6.2603),
+    "Phibsborough Garage, Dublin": (53.3601, -6.2777),
+    "Broadstone Garage, Dublin": (53.3550, -6.2730),
+    "Clontarf Garage, Dublin": (53.3632, -6.2198),
+    "Summerhill Garage, Dublin": (53.3532, -6.2504),
+    "Donnybrook Garage, Dublin": (53.3195, -6.2291),
+    "Conyngham Road Garage, Dublin": (53.3474, -6.3105),
+    "Grand Canal Dock, Dublin": (53.3340, -6.2430),
+    "Heuston Station, Dublin": (53.3474, -6.2925),
+    "Dublin Airport, Dublin": (53.4273, -6.2436),
+    "Custom House, Dublin": (53.3478, -6.2512)
+}
 
 st.sidebar.header("Route Parameters")
 
-# Start Location Mode: GPS or Manual Autocomplete
+# 1. Start Location
 st.sidebar.subheader("1. Start Location")
-start_mode = st.sidebar.radio("Start Method", ["Use Device GPS", "Type Manual Address"])
+start_mode = st.sidebar.radio("Start Method", ["Use Device GPS", "Select Preset / Manual Entry"])
 
 orig_lat, orig_lon = None, None
 
@@ -98,33 +85,42 @@ if start_mode == "Use Device GPS":
     else:
         st.sidebar.info("Waiting for GPS signal...")
 else:
-    start_selection = st_searchbox(
-        search_dublin_locations,
-        key="start_searchbox",
-        placeholder="Type starting street, garage, or landmark..."
-    )
-    if start_selection:
-        orig_lat, orig_lon = start_selection
-        st.sidebar.success(f"Start set to coordinates: {orig_lat:.4f}, {orig_lon:.4f}")
+    start_choice = st.sidebar.selectbox("Choose Start Location", list(POPULAR_LOCATIONS.keys()), key="start_select")
+    if start_choice != "-- Select or type below --":
+        orig_lat, orig_lon = POPULAR_LOCATIONS[start_choice]
+    else:
+        custom_start = st.sidebar.text_input("Or type custom start address", "")
+        if custom_start:
+            try:
+                coords = ox.geocode(f"{custom_start}, Dublin, Ireland")
+                orig_lat, orig_lon = coords
+                st.sidebar.success(f"Found: {custom_start}")
+            except Exception:
+                st.sidebar.error("Could not find address. Try adding more detail.")
 
+# 2. Destination
 st.sidebar.subheader("2. Destination")
-dest_selection = st_searchbox(
-    search_dublin_locations,
-    key="dest_searchbox",
-    placeholder="Type destination address..."
-)
+dest_choice = st.sidebar.selectbox("Choose Destination", list(POPULAR_LOCATIONS.keys()), key="dest_select")
 
 dest_lat, dest_lon = None, None
-if dest_selection:
-    dest_lat, dest_lon = dest_selection
+if dest_choice != "-- Select or type below --":
+    dest_lat, dest_lon = POPULAR_LOCATIONS[dest_choice]
+else:
+    custom_dest = st.sidebar.text_input("Or type custom destination address", "Grand Canal Dock")
+    if custom_dest:
+        try:
+            coords = ox.geocode(f"{custom_dest}, Dublin, Ireland")
+            dest_lat, dest_lon = coords
+        except Exception:
+            pass
 
 run_routing = st.sidebar.button("Calculate Safe Route", type="primary")
 
 if run_routing:
     if orig_lat is None or orig_lon is None:
-        st.error("Please provide a valid starting location (either via GPS or manual search selection).")
+        st.error("Please provide a valid starting location (via GPS or selection).")
     elif dest_lat is None or dest_lon is None:
-        st.error("Please select a valid destination from the dropdown suggestions.")
+        st.error("Please select or type a valid destination.")
     else:
         try:
             with st.spinner("Computing bridge-safe route..."):
