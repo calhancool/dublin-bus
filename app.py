@@ -5,6 +5,7 @@ import folium
 from streamlit_folium import st_folium
 from streamlit_geolocation import streamlit_geolocation
 import re
+import urllib.parse
 
 st.set_page_config(page_title="Dublin Bus Safe Router", layout="wide")
 
@@ -15,6 +16,8 @@ if "route_map" not in st.session_state:
     st.session_state.route_map = None
 if "route_message" not in st.session_state:
     st.session_state.route_message = ""
+if "gmaps_link" not in st.session_state:
+    st.session_state.gmaps_link = ""
 
 def parse_height_to_meters(height_str):
     if not height_str or not isinstance(height_str, (str, int, float)):
@@ -32,6 +35,7 @@ def parse_height_to_meters(height_str):
 
 @st.cache_resource
 def load_routing_graph():
+    # Expanded to County Dublin to cover outer suburbs & depots like Jobstown
     place_name = "County Dublin, Ireland"
     G = ox.graph_from_place(place_name, network_type="drive", retain_all=False)
     BUS_HEIGHT_THRESHOLD = 4.6 
@@ -48,10 +52,9 @@ def load_routing_graph():
     safe_edges = [(u, v, k) for u, v, k, data in G.edges(keys=True, data=True) if not data.get('unsafe_for_bus', False)]
     return G.edge_subgraph(safe_edges).copy()
 
-with st.spinner("Loading Dublin road network and checking low bridges..."):
+with st.spinner("Loading County Dublin road network and checking low bridges..."):
     G_safe = load_routing_graph()
 
-# Popular Dublin locations and depots for instant selection or fallback typing
 POPULAR_LOCATIONS = {
     "-- Select or type below --": None,
     "O'Connell Street, Dublin": (53.3498, -6.2603),
@@ -61,6 +64,7 @@ POPULAR_LOCATIONS = {
     "Summerhill Garage, Dublin": (53.3532, -6.2504),
     "Donnybrook Garage, Dublin": (53.3195, -6.2291),
     "Conyngham Road Garage, Dublin": (53.3474, -6.3105),
+    "Jobstown, Tallaght": (53.2774, -6.3765),
     "Grand Canal Dock, Dublin": (53.3340, -6.2430),
     "Heuston Station, Dublin": (53.3474, -6.2925),
     "Dublin Airport, Dublin": (53.4273, -6.2436),
@@ -69,7 +73,6 @@ POPULAR_LOCATIONS = {
 
 st.sidebar.header("Route Parameters")
 
-# 1. Start Location
 st.sidebar.subheader("1. Start Location")
 start_mode = st.sidebar.radio("Start Method", ["Use Device GPS", "Select Preset / Manual Entry"])
 
@@ -92,13 +95,12 @@ else:
         custom_start = st.sidebar.text_input("Or type custom start address", "")
         if custom_start:
             try:
-                coords = ox.geocode(f"{custom_start}, Dublin, Ireland")
+                coords = ox.geocode(f"{custom_start}, County Dublin, Ireland")
                 orig_lat, orig_lon = coords
                 st.sidebar.success(f"Found: {custom_start}")
             except Exception:
                 st.sidebar.error("Could not find address. Try adding more detail.")
 
-# 2. Destination
 st.sidebar.subheader("2. Destination")
 dest_choice = st.sidebar.selectbox("Choose Destination", list(POPULAR_LOCATIONS.keys()), key="dest_select")
 
@@ -109,7 +111,7 @@ else:
     custom_dest = st.sidebar.text_input("Or type custom destination address", "Grand Canal Dock")
     if custom_dest:
         try:
-            coords = ox.geocode(f"{custom_dest}, Dublin, Ireland")
+            coords = ox.geocode(f"{custom_dest}, County Dublin, Ireland")
             dest_lat, dest_lon = coords
         except Exception:
             pass
@@ -135,15 +137,40 @@ if run_routing:
                 folium.Marker(route_coords[0], popup="Start Point", icon=folium.Icon(color="green", icon="play")).add_to(route_map)
                 folium.Marker(route_coords[-1], popup="Destination", icon=folium.Icon(color="blue", icon="stop")).add_to(route_map)
                 
+                # Generate Google Maps Navigation URL with sampled waypoints to preserve the safe path
+                # We pick up to 8 evenly spaced waypoints along the route
+                step = max(1, len(route) // 8)
+                sampled_nodes = route[::step]
+                waypoints = [f"{G_safe.nodes[n]['y']},{G_safe.nodes[n]['x']}" for n in sampled_nodes[1:-1]]
+                
+                gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={orig_lat},{orig_lon}&destination={dest_lat},{dest_lon}"
+                if waypoints:
+                    gmaps_url += f"&waypoints={'|'.join(waypoints)}"
+                
                 st.session_state.route_map = route_map
-                st.session_state.route_message = f"Route successfully plotted avoiding all low structures! Total nodes crossed: {len(route)}"
+                st.session_state.gmaps_link = gmaps_url
+                st.session_state.route_message = f"Route successfully plotted covering County Dublin! Total nodes crossed: {len(route)}"
         except Exception as e:
             st.session_state.route_map = None
+            st.session_state.gmaps_link = ""
             st.session_state.route_message = f"Error computing route: {e}"
 
 if st.session_state.route_map is not None:
     st.subheader("Generated Safe Path")
     st_folium(st.session_state.route_map, width=700, height=500, returned_objects=[])
     st.success(st.session_state.route_message)
+    
+    # Display a big clickable button that opens Google Maps with the safe route pre-loaded
+    if st.session_state.gmaps_link:
+        st.markdown(
+            f"""
+            <a href="{st.session_state.gmaps_link}" target="_blank">
+                <button style="background-color:#4CAF50; color:white; padding:12px 20px; border:none; border-radius:5px; font-size:16px; font-weight:bold; cursor:pointer; width:100%;">
+                    🚗 Open Bridge-Safe Route in Google Maps
+                </button>
+            </a>
+            """,
+            unsafe_allow_html=True
+        )
 elif st.session_state.route_message.startswith("Error"):
     st.error(st.session_state.route_message)
