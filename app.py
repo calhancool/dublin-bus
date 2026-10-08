@@ -10,7 +10,7 @@ st.set_page_config(page_title="Dublin Bus Safe Router", layout="wide")
 st.title("🚌 Dublin Bus Bridge-Safe Navigation")
 st.write("Route planner tailored for mechanics, test drivers, and depot vehicle transfers.")
 
-# Initialize session state variables so the map stays visible
+# Initialize session state variables
 if "route_map" not in st.session_state:
     st.session_state.route_map = None
 if "route_message" not in st.session_state:
@@ -85,9 +85,9 @@ else:
                 dest_lat, dest_lon = dest_coords
                 run_routing = True
         except Exception as e:
-            st.sidebar.error(f"Could not find one or both locations. Try adding more detail. Error: {e}")
+            st.sidebar.error(f"Could not find one or both locations. Error: {e}")
 
-# If calculate button was pressed, compute route and save it to session state
+# Compute route and save to session state on button click
 if run_routing and orig_lat is not None:
     try:
         with st.spinner("Computing bridge-safe route..."):
@@ -95,24 +95,24 @@ if run_routing and orig_lat is not None:
             dest_node = ox.distance.nearest_nodes(G_safe, X=dest_lon, Y=dest_lat)
             route = nx.shortest_path(G_safe, orig_node, dest_node, weight='length')
             
-            route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles='CartoDB positron')
+            # Use standard OpenStreetMap tiles to guarantee visibility
+            route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles='OpenStreetMap')
             route_coords = [(G_safe.nodes[node]['y'], G_safe.nodes[node]['x']) for node in route]
             
             folium.PolyLine(route_coords, color="#FF4B4B", weight=6, opacity=0.85, tooltip="Bridge-Safe Route").add_to(route_map)
             folium.Marker(route_coords[0], popup="Start", icon=folium.Icon(color="green")).add_to(route_map)
             folium.Marker(route_coords[-1], popup="Destination", icon=folium.Icon(color="blue")).add_to(route_map)
             
-            # Save into session state so it stays persistent
             st.session_state.route_map = route_map
             st.session_state.route_message = f"Route plotted safely! Total nodes crossed: {len(route)}"
     except Exception as e:
         st.session_state.route_map = None
         st.session_state.route_message = f"Error computing route: {e}"
 
-# Always render the map from session state if it exists
+# Render map from session state without triggering reloads (returned_objects=[])
 if st.session_state.route_map is not None:
     st.subheader("Generated Safe Path")
-    st_folium(st.session_state.route_map, width=700, height=500)
+    st_folium(st.session_state.route_map, width=700, height=500, returned_objects=[])
     st.success(st.session_state.route_message)
 elif st.session_state.route_message.startswith("Error"):
     st.error(st.session_state.route_message)
