@@ -10,7 +10,6 @@ st.set_page_config(page_title="Dublin Bus Safe Router", layout="wide")
 st.title("🚌 Dublin Bus Bridge-Safe Navigation")
 st.write("Route planner tailored for mechanics, test drivers, and depot vehicle transfers.")
 
-# Initialize session state variables
 if "route_map" not in st.session_state:
     st.session_state.route_map = None
 if "route_message" not in st.session_state:
@@ -87,7 +86,6 @@ else:
         except Exception as e:
             st.sidebar.error(f"Could not find one or both locations. Error: {e}")
 
-# Compute route and save to session state on button click
 if run_routing and orig_lat is not None:
     try:
         with st.spinner("Computing bridge-safe route..."):
@@ -95,8 +93,14 @@ if run_routing and orig_lat is not None:
             dest_node = ox.distance.nearest_nodes(G_safe, X=dest_lon, Y=dest_lat)
             route = nx.shortest_path(G_safe, orig_node, dest_node, weight='length')
             
-            # Use standard OpenStreetMap tiles to guarantee visibility
-            route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles='OpenStreetMap')
+            # Using a completely free public tile layer that requires no API keys
+            route_map = folium.Map(
+                location=[orig_lat, orig_lon], 
+                zoom_start=13, 
+                tiles='https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            )
+            
             route_coords = [(G_safe.nodes[node]['y'], G_safe.nodes[node]['x']) for node in route]
             
             folium.PolyLine(route_coords, color="#FF4B4B", weight=6, opacity=0.85, tooltip="Bridge-Safe Route").add_to(route_map)
@@ -109,7 +113,6 @@ if run_routing and orig_lat is not None:
         st.session_state.route_map = None
         st.session_state.route_message = f"Error computing route: {e}"
 
-# Render map from session state without triggering reloads (returned_objects=[])
 if st.session_state.route_map is not None:
     st.subheader("Generated Safe Path")
     st_folium(st.session_state.route_map, width=700, height=500, returned_objects=[])
