@@ -5,5 +5,4 @@ folium
 streamlit-folium
 scikit-learn
 streamlit-geolocation
-streamlit-searchbox
 requests
