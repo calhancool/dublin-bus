@@ -32,7 +32,7 @@ def parse_height_to_meters(height_str):
 
 @st.cache_resource
 def load_routing_graph():
-    place_name = "Dublin, Ireland"
+    place_name = "County Dublin, Ireland"
     G = ox.graph_from_place(place_name, network_type="drive", retain_all=False)
     BUS_HEIGHT_THRESHOLD = 4.6 
     for u, v, k, data in G.edges(keys=True, data=True):
