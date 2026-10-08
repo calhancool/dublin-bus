@@ -3,6 +3,7 @@ import osmnx as ox
 import networkx as nx
 import folium
 from streamlit_folium import st_folium
+from streamlit_geolocation import streamlit_geolocation
 import re
 
 st.set_page_config(page_title="Dublin Bus Safe Router", layout="wide")
@@ -51,62 +52,49 @@ with st.spinner("Loading Dublin road network and checking low bridges..."):
     G_safe = load_routing_graph()
 
 st.sidebar.header("Route Parameters")
-input_mode = st.sidebar.radio("Input Method", ["Presets", "Type Custom Address"])
 
-orig_lat, orig_lon, dest_lat, dest_lon = None, None, None, None
-run_routing = False
+st.sidebar.subheader("1. Start Location (GPS)")
+st.sidebar.write("Click below to get your current location from your device:")
+loc = streamlit_geolocation()
 
-if input_mode == "Presets":
-    route_option = st.sidebar.selectbox(
-        "Choose Test Route:",
-        ["O'Connell St to Grand Canal Dock", "Phibsborough to Dublin Airport approach", "Heuston Station to Custom House"]
-    )
-    if route_option == "O'Connell St to Grand Canal Dock":
-        orig_lat, orig_lon, dest_lat, dest_lon = 53.3498, -6.2603, 53.3340, -6.2430
-    elif route_option == "Phibsborough to Dublin Airport approach":
-        orig_lat, orig_lon, dest_lat, dest_lon = 53.3601, -6.2777, 53.4273, -6.2436
-    else:
-        orig_lat, orig_lon, dest_lat, dest_lon = 53.3474, -6.2925, 53.3478, -6.2512
-    
-    run_routing = st.sidebar.button("Calculate Safe Route", type="primary")
-
+orig_lat, orig_lon = None, None
+if loc and loc.get('latitude') and loc.get('longitude'):
+    orig_lat = loc['latitude']
+    orig_lon = loc['longitude']
+    st.sidebar.success(f"GPS Acquired! Lat: {orig_lat:.4f}, Lon: {orig_lon:.4f}")
 else:
-    start_input = st.sidebar.text_input("Start Location", "O'Connell Street")
-    dest_input = st.sidebar.text_input("Destination", "Grand Canal Dock")
-    click_search = st.sidebar.button("Calculate Safe Route", type="primary")
-    
-    if click_search:
-        try:
-            with st.spinner("Locating addresses in Dublin..."):
-                start_coords = ox.geocode(f"{start_input}, Dublin, Ireland")
-                dest_coords = ox.geocode(f"{dest_input}, Dublin, Ireland")
-                orig_lat, orig_lon = start_coords
-                dest_lat, dest_lon = dest_coords
-                run_routing = True
-        except Exception as e:
-            st.sidebar.error(f"Could not find one or both locations. Error: {e}")
+    st.sidebar.info("Waiting for GPS location... (Tap the button above)")
 
-if run_routing and orig_lat is not None:
-    try:
-        with st.spinner("Computing bridge-safe route..."):
-            orig_node = ox.distance.nearest_nodes(G_safe, X=orig_lon, Y=orig_lat)
-            dest_node = ox.distance.nearest_nodes(G_safe, X=dest_lon, Y=dest_lat)
-            route = nx.shortest_path(G_safe, orig_node, dest_node, weight='length')
-            
-            # Using Esri World Street Map (free, high quality, requires no keys)
-            route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles="Esri.WorldStreetMap")
-            
-            route_coords = [(G_safe.nodes[node]['y'], G_safe.nodes[node]['x']) for node in route]
-            
-            folium.PolyLine(route_coords, color="#FF4B4B", weight=6, opacity=0.85, tooltip="Bridge-Safe Route").add_to(route_map)
-            folium.Marker(route_coords[0], popup="Start", icon=folium.Icon(color="green")).add_to(route_map)
-            folium.Marker(route_coords[-1], popup="Destination", icon=folium.Icon(color="blue")).add_to(route_map)
-            
-            st.session_state.route_map = route_map
-            st.session_state.route_message = f"Route plotted safely! Total nodes crossed: {len(route)}"
-    except Exception as e:
-        st.session_state.route_map = None
-        st.session_state.route_message = f"Error computing route: {e}"
+st.sidebar.subheader("2. Destination")
+dest_input = st.sidebar.text_input("Enter Destination (e.g., Grand Canal Dock)", "Grand Canal Dock")
+
+run_routing = st.sidebar.button("Calculate Safe Route", type="primary")
+
+if run_routing:
+    if orig_lat is None or orig_lon is None:
+        st.error("Please allow GPS location access in your browser or click the geolocation button first.")
+    else:
+        try:
+            with st.spinner("Locating destination and computing bridge-safe path..."):
+                dest_coords = ox.geocode(f"{dest_input}, Dublin, Ireland")
+                dest_lat, dest_lon = dest_coords
+                
+                orig_node = ox.distance.nearest_nodes(G_safe, X=orig_lon, Y=orig_lat)
+                dest_node = ox.distance.nearest_nodes(G_safe, X=dest_lon, Y=dest_lat)
+                route = nx.shortest_path(G_safe, orig_node, dest_node, weight='length')
+                
+                route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles="Esri.WorldStreetMap")
+                route_coords = [(G_safe.nodes[node]['y'], G_safe.nodes[node]['x']) for node in route]
+                
+                folium.PolyLine(route_coords, color="#FF4B4B", weight=6, opacity=0.85, tooltip="Bridge-Safe Route").add_to(route_map)
+                folium.Marker(route_coords[0], popup="Current GPS Location", icon=folium.Icon(color="green", icon="play")).add_to(route_map)
+                folium.Marker(route_coords[-1], popup="Destination", icon=folium.Icon(color="blue", icon="stop")).add_to(route_map)
+                
+                st.session_state.route_map = route_map
+                st.session_state.route_message = f"Route plotted safely from your GPS position! Total nodes crossed: {len(route)}"
+        except Exception as e:
+            st.session_state.route_map = None
+            st.session_state.route_message = f"Error computing route or finding destination: {e}"
 
 if st.session_state.route_map is not None:
     st.subheader("Generated Safe Path")
