@@ -7,10 +7,54 @@ from streamlit_geolocation import streamlit_geolocation
 import re
 import urllib.parse
 
-st.set_page_config(page_title="Dublin Bus Safe Router", layout="wide")
+# Page configuration
+st.set_page_config(
+    page_title="Dublin Bus Safe Router",
+    page_icon="🚌",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-st.title("🚌 Dublin Bus Bridge-Safe Navigation")
-st.write("Route planner tailored for mechanics, test drivers, and depot vehicle transfers.")
+# Custom CSS for a clean, professional, mobile-friendly look
+st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2rem;
+        color: #1E3A8A;
+        font-weight: 700;
+        margin-bottom: 0px;
+    }
+    .sub-text {
+        color: #4B5563;
+        font-size: 1.1rem;
+        margin-bottom: 20px;
+    }
+    .card {
+        background-color: #F8FAFC;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #E2E8F0;
+        margin-bottom: 20px;
+    }
+    .badge-safe {
+        background-color: #DEF7EC;
+        color: #03543F;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 0.9rem;
+        display: inline-block;
+        margin-bottom: 15px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# App Header
+st.markdown('<p class="main-header">🚌 Dublin Bus Safe Navigation</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-text">Bridge-safe routing for depot transfers and test driving.</p>', unsafe_allow_html=True)
+
+# Status Badge
+st.markdown('<div class="badge-safe">🛡️ Vehicle Profile: Double-Decker (Height Threshold: 4.6m)</div>', unsafe_allow_html=True)
 
 if "route_map" not in st.session_state:
     st.session_state.route_map = None
@@ -35,7 +79,6 @@ def parse_height_to_meters(height_str):
 
 @st.cache_resource
 def load_routing_graph():
-    # Expanded to County Dublin to cover outer suburbs & depots like Jobstown
     place_name = "County Dublin, Ireland"
     G = ox.graph_from_place(place_name, network_type="drive", retain_all=False)
     BUS_HEIGHT_THRESHOLD = 4.6 
@@ -52,11 +95,11 @@ def load_routing_graph():
     safe_edges = [(u, v, k) for u, v, k, data in G.edges(keys=True, data=True) if not data.get('unsafe_for_bus', False)]
     return G.edge_subgraph(safe_edges).copy()
 
-with st.spinner("Loading County Dublin road network and checking low bridges..."):
+with st.spinner("Loading County Dublin road network & checking low bridges..."):
     G_safe = load_routing_graph()
 
 POPULAR_LOCATIONS = {
-    "-- Select or type below --": None,
+    "-- Select a Depot or Landmark --": None,
     "O'Connell Street, Dublin": (53.3498, -6.2603),
     "Phibsborough Garage, Dublin": (53.3601, -6.2777),
     "Broadstone Garage, Dublin": (53.3550, -6.2730),
@@ -71,61 +114,72 @@ POPULAR_LOCATIONS = {
     "Custom House, Dublin": (53.3478, -6.2512)
 }
 
-st.sidebar.header("Route Parameters")
+# --- MAIN INTERFACE CARD ---
+with st.container():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📍 1. Start Location")
+        start_mode = st.radio("Start Method", ["Use Device GPS", "Choose Preset / Custom"], label_visibility="collapsed")
+        
+        orig_lat, orig_lon = None, None
+        
+        if start_mode == "Use Device GPS":
+            st.write("Tap to fetch your phone/tablet GPS:")
+            loc = streamlit_geolocation()
+            if loc and loc.get('latitude') and loc.get('longitude'):
+                orig_lat = loc['latitude']
+                orig_lon = loc['longitude']
+                st.success(f"GPS Locked ({orig_lat:.4f}, {orig_lon:.4f})")
+            else:
+                st.info("Waiting for GPS signal...")
+        else:
+            start_choice = st.selectbox("Start Location", list(POPULAR_LOCATIONS.keys()), key="start_select")
+            if start_choice != "-- Select a Depot or Landmark --":
+                orig_lat, orig_lon = POPULAR_LOCATIONS[start_choice]
+            else:
+                custom_start = st.text_input("Or type custom start address", placeholder="e.g. O'Connell Street")
+                if custom_start:
+                    try:
+                        orig_lat, orig_lon = ox.geocode(f"{custom_start}, County Dublin, Ireland")
+                        st.success(f"Found: {custom_start}")
+                    except Exception:
+                        st.error("Location not found.")
 
-st.sidebar.subheader("1. Start Location")
-start_mode = st.sidebar.radio("Start Method", ["Use Device GPS", "Select Preset / Manual Entry"])
+    with col2:
+        st.subheader("🎯 2. Destination")
+        # Add spacing to align nicely with columns
+        st.write("") 
+        dest_choice = st.selectbox("Destination Location", list(POPULAR_LOCATIONS.keys()), key="dest_select")
+        
+        dest_lat, dest_lon = None, None
+        if dest_choice != "-- Select a Depot or Landmark --":
+            dest_lat, dest_lon = POPULAR_LOCATIONS[dest_choice]
+        else:
+            custom_dest = st.text_input("Or type custom destination", placeholder="e.g. Grand Canal Dock")
+            if custom_dest:
+                try:
+                    dest_lat, dest_lon = ox.geocode(f"{custom_dest}, County Dublin, Ireland")
+                except Exception:
+                    pass
 
-orig_lat, orig_lon = None, None
+    st.markdown("---")
+    
+    # Big Touch-Friendly Action Button
+    run_routing = st.button("🚀 Calculate Bridge-Safe Route", type="primary", use_container_width=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
-if start_mode == "Use Device GPS":
-    st.sidebar.write("Tap below to fetch your current GPS position:")
-    loc = streamlit_geolocation()
-    if loc and loc.get('latitude') and loc.get('longitude'):
-        orig_lat = loc['latitude']
-        orig_lon = loc['longitude']
-        st.sidebar.success(f"GPS Active: {orig_lat:.4f}, {orig_lon:.4f}")
-    else:
-        st.sidebar.info("Waiting for GPS signal...")
-else:
-    start_choice = st.sidebar.selectbox("Choose Start Location", list(POPULAR_LOCATIONS.keys()), key="start_select")
-    if start_choice != "-- Select or type below --":
-        orig_lat, orig_lon = POPULAR_LOCATIONS[start_choice]
-    else:
-        custom_start = st.sidebar.text_input("Or type custom start address", "")
-        if custom_start:
-            try:
-                coords = ox.geocode(f"{custom_start}, County Dublin, Ireland")
-                orig_lat, orig_lon = coords
-                st.sidebar.success(f"Found: {custom_start}")
-            except Exception:
-                st.sidebar.error("Could not find address. Try adding more detail.")
-
-st.sidebar.subheader("2. Destination")
-dest_choice = st.sidebar.selectbox("Choose Destination", list(POPULAR_LOCATIONS.keys()), key="dest_select")
-
-dest_lat, dest_lon = None, None
-if dest_choice != "-- Select or type below --":
-    dest_lat, dest_lon = POPULAR_LOCATIONS[dest_choice]
-else:
-    custom_dest = st.sidebar.text_input("Or type custom destination address", "Grand Canal Dock")
-    if custom_dest:
-        try:
-            coords = ox.geocode(f"{custom_dest}, County Dublin, Ireland")
-            dest_lat, dest_lon = coords
-        except Exception:
-            pass
-
-run_routing = st.sidebar.button("Calculate Safe Route", type="primary")
-
+# --- ROUTING LOGIC ---
 if run_routing:
     if orig_lat is None or orig_lon is None:
-        st.error("Please provide a valid starting location (via GPS or selection).")
+        st.error("⚠️ Please specify a valid starting point via GPS or selection.")
     elif dest_lat is None or dest_lon is None:
-        st.error("Please select or type a valid destination.")
+        st.error("⚠️ Please select or type a valid destination.")
     else:
         try:
-            with st.spinner("Computing bridge-safe route..."):
+            with st.spinner("Calculating safe path avoiding low bridges..."):
                 orig_node = ox.distance.nearest_nodes(G_safe, X=orig_lon, Y=orig_lat)
                 dest_node = ox.distance.nearest_nodes(G_safe, X=dest_lon, Y=dest_lat)
                 route = nx.shortest_path(G_safe, orig_node, dest_node, weight='length')
@@ -137,8 +191,7 @@ if run_routing:
                 folium.Marker(route_coords[0], popup="Start Point", icon=folium.Icon(color="green", icon="play")).add_to(route_map)
                 folium.Marker(route_coords[-1], popup="Destination", icon=folium.Icon(color="blue", icon="stop")).add_to(route_map)
                 
-                # Generate Google Maps Navigation URL with sampled waypoints to preserve the safe path
-                # We pick up to 8 evenly spaced waypoints along the route
+                # Google Maps Waypoints URL
                 step = max(1, len(route) // 8)
                 sampled_nodes = route[::step]
                 waypoints = [f"{G_safe.nodes[n]['y']},{G_safe.nodes[n]['x']}" for n in sampled_nodes[1:-1]]
@@ -149,28 +202,31 @@ if run_routing:
                 
                 st.session_state.route_map = route_map
                 st.session_state.gmaps_link = gmaps_url
-                st.session_state.route_message = f"Route successfully plotted covering County Dublin! Total nodes crossed: {len(route)}"
+                st.session_state.route_message = f"Route successfully calculated! Total road segments verified: {len(route)}"
         except Exception as e:
             st.session_state.route_map = None
             st.session_state.gmaps_link = ""
             st.session_state.route_message = f"Error computing route: {e}"
 
+# --- DISPLAY RESULTS ---
 if st.session_state.route_map is not None:
-    st.subheader("Generated Safe Path")
-    st_folium(st.session_state.route_map, width=700, height=500, returned_objects=[])
     st.success(st.session_state.route_message)
     
-    # Display a big clickable button that opens Google Maps with the safe route pre-loaded
+    # Big Navigation Button
     if st.session_state.gmaps_link:
         st.markdown(
             f"""
             <a href="{st.session_state.gmaps_link}" target="_blank">
-                <button style="background-color:#4CAF50; color:white; padding:12px 20px; border:none; border-radius:5px; font-size:16px; font-weight:bold; cursor:pointer; width:100%;">
+                <button style="background-color:#10B981; color:white; padding:15px 20px; border:none; border-radius:8px; font-size:18px; font-weight:bold; cursor:pointer; width:100%; margin-bottom:15px;">
                     🚗 Open Bridge-Safe Route in Google Maps
                 </button>
             </a>
             """,
             unsafe_allow_html=True
         )
+        
+    st.subheader("🗺️ Route Map Preview")
+    st_folium(st.session_state.route_map, width=1200, height=550, returned_objects=[])
+
 elif st.session_state.route_message.startswith("Error"):
     st.error(st.session_state.route_message)
