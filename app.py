@@ -16,13 +16,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for a clean, professional look
+# Custom CSS with Dublin Bus Branding Colors (Navy Blue #13366E and Bright Yellow #FFDD00 / #F3AE00)
 st.markdown("""
     <style>
     .main-header {
-        font-size: 2rem;
-        color: #1E3A8A;
-        font-weight: 700;
+        font-size: 2.2rem;
+        color: #13366E;
+        font-weight: 800;
         margin-bottom: 0px;
     }
     .sub-text {
@@ -34,27 +34,43 @@ st.markdown("""
         background-color: #F8FAFC;
         padding: 20px;
         border-radius: 10px;
-        border: 1px solid #E2E8F0;
+        border-top: 5px solid #13366E;
+        border-left: 1px solid #E2E8F0;
+        border-right: 1px solid #E2E8F0;
+        border-bottom: 1px solid #E2E8F0;
         margin-bottom: 20px;
     }
     .badge-safe {
-        background-color: #DEF7EC;
-        color: #03543F;
-        padding: 6px 12px;
+        background-color: #13366E;
+        color: #FFDD00;
+        padding: 8px 15px;
         border-radius: 20px;
         font-weight: bold;
-        font-size: 0.9rem;
+        font-size: 0.95rem;
         display: inline-block;
         margin-bottom: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .stButton>button {
+        background-color: #F3AE00 !important;
+        color: #13366E !important;
+        font-weight: 800 !important;
+        border-radius: 8px !important;
+        border: none !important;
+        padding: 0.6rem 1rem !important;
+    }
+    .stButton>button:hover {
+        background-color: #FFDD00 !important;
+        color: #13366E !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# App Header
+# App Header with Dublin Bus style title
 st.markdown('<p class="main-header">🚌 Dublin Bus Safe Navigation</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-text">Bridge-safe & wide-road routing for depot transfers and test driving.</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-text">Official bridge-safe & narrow-road routing tool for depot transfers and test driving.</p>', unsafe_allow_html=True)
 
-# Status Badge
+# Status Badge in Dublin Bus Navy & Gold
 st.markdown('<div class="badge-safe">🛡️ Profile: Double-Decker (Max Height: 4.6m | Skinny Road Avoidance Active)</div>', unsafe_allow_html=True)
 
 if "route_map" not in st.session_state:
@@ -85,7 +101,6 @@ def load_routing_graph():
     BUS_HEIGHT_THRESHOLD = 4.6 
     
     for u, v, k, data in G.edges(keys=True, data=True):
-        # 1. Check Low Bridges (< 4.6m)
         max_height_tag = data.get('maxheight')
         is_unsafe = False
         if max_height_tag:
@@ -95,26 +110,19 @@ def load_routing_graph():
         
         data['unsafe_for_bus'] = is_unsafe
         
-        # 2. Assign Bus-Friendliness Weights to Avoid Skinny Roads
-        # Get road highway type (can be a string or list)
         highway_type = data.get('highway', 'road')
         if isinstance(highway_type, list):
             highway_type = highway_type[0]
             
         length = data.get('length', 1.0)
         
-        # Apply cost penalties to narrow road classes so the router prefers wider corridors
         if highway_type in ['residential', 'living_street', 'service', 'track']:
-            # Heavy penalty for skinny residential or service lanes
             data['bus_weight'] = length * 3.0
         elif highway_type == 'unclassified':
-            # Moderate penalty for minor local roads
             data['bus_weight'] = length * 1.8
         else:
-            # Preferred wide roads (primary, secondary, tertiary, trunk, motorway)
             data['bus_weight'] = length * 1.0
 
-    # Filter out unsafe bridge edges
     safe_edges = [(u, v, k) for u, v, k, data in G.edges(keys=True, data=True) if not data.get('unsafe_for_bus', False)]
     return G.edge_subgraph(safe_edges).copy()
 
@@ -188,7 +196,7 @@ with st.container():
 
     st.markdown("---")
     
-    run_routing = st.button("🚀 Calculate Bus-Safe Route", type="primary", use_container_width=True)
+    run_routing = st.button("🚀 Calculate Bus-Safe Route", use_container_width=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -204,17 +212,15 @@ if run_routing:
                 orig_node = ox.distance.nearest_nodes(G_safe, X=orig_lon, Y=orig_lat)
                 dest_node = ox.distance.nearest_nodes(G_safe, X=dest_lon, Y=dest_lat)
                 
-                # Using 'bus_weight' instead of 'length' to prioritize wide roads
                 route = nx.shortest_path(G_safe, orig_node, dest_node, weight='bus_weight')
                 
                 route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles="Esri.WorldStreetMap")
                 route_coords = [(G_safe.nodes[node]['y'], G_safe.nodes[node]['x']) for node in route]
                 
-                folium.PolyLine(route_coords, color="#FF4B4B", weight=6, opacity=0.85, tooltip="Bus-Safe Route").add_to(route_map)
+                folium.PolyLine(route_coords, color="#13366E", weight=6, opacity=0.85, tooltip="Bus-Safe Route").add_to(route_map)
                 folium.Marker(route_coords[0], popup="Start Point", icon=folium.Icon(color="green", icon="play")).add_to(route_map)
                 folium.Marker(route_coords[-1], popup="Destination", icon=folium.Icon(color="blue", icon="stop")).add_to(route_map)
                 
-                # Smarter Waypoint Sampling for Google Maps
                 waypoints = []
                 last_lat, last_lon = orig_lat, orig_lon
                 
@@ -251,7 +257,7 @@ if st.session_state.route_map is not None:
         st.markdown(
             f"""
             <a href="{st.session_state.gmaps_link}" target="_blank">
-                <button style="background-color:#10B981; color:white; padding:15px 20px; border:none; border-radius:8px; font-size:18px; font-weight:bold; cursor:pointer; width:100%; margin-bottom:15px;">
+                <button style="background-color:#13366E; color:#FFDD00; padding:15px 20px; border:none; border-radius:8px; font-size:18px; font-weight:bold; cursor:pointer; width:100%; margin-bottom:15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
                     🚗 Open Bus-Safe Route in Google Maps
                 </button>
             </a>
