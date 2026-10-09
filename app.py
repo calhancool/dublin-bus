@@ -3,6 +3,7 @@ import osmnx as ox
 import networkx as nx
 import folium
 from streamlit_folium import st_folium
+import math
 from streamlit_geolocation import streamlit_geolocation
 import re
 import urllib.parse
@@ -149,7 +150,6 @@ with st.container():
 
     with col2:
         st.subheader("🎯 2. Destination")
-        # Add spacing to align nicely with columns
         st.write("") 
         dest_choice = st.selectbox("Destination Location", list(POPULAR_LOCATIONS.keys()), key="dest_select")
         
@@ -166,7 +166,6 @@ with st.container():
 
     st.markdown("---")
     
-    # Big Touch-Friendly Action Button
     run_routing = st.button("🚀 Calculate Bridge-Safe Route", type="primary", use_container_width=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
@@ -191,10 +190,26 @@ if run_routing:
                 folium.Marker(route_coords[0], popup="Start Point", icon=folium.Icon(color="green", icon="play")).add_to(route_map)
                 folium.Marker(route_coords[-1], popup="Destination", icon=folium.Icon(color="blue", icon="stop")).add_to(route_map)
                 
-                # Google Maps Waypoints URL
-                step = max(1, len(route) // 8)
-                sampled_nodes = route[::step]
-                waypoints = [f"{G_safe.nodes[n]['y']},{G_safe.nodes[n]['x']}" for n in sampled_nodes[1:-1]]
+                # Smarter Waypoint Sampling: Filter out tight clusters to prevent Google Maps from looping
+                # Only pick points spaced at least ~1.5km apart along the route
+                waypoints = []
+                last_lat, last_lon = orig_lat, orig_lon
+                
+                # Take samples along the route
+                sample_step = max(1, len(route) // 15)
+                for i in range(sample_step, len(route) - 1, sample_step):
+                    node = route[i]
+                    lat = G_safe.nodes[node]['y']
+                    lon = G_safe.nodes[node]['x']
+                    
+                    # Calculate rough distance in meters from the last waypoint
+                    dist_approx = math.sqrt((lat - last_lat)**2 + (lon - last_lon)**2) * 111000
+                    if dist_approx > 1200:  # Only add waypoint if it's over 1.2km away from the previous one
+                        waypoints.append(f"{lat},{lon}")
+                        last_lat, last_lon = lat, lon
+                
+                # Keep max 5 waypoints to avoid overloading Google Maps' router
+                waypoints = waypoints[:5]
                 
                 gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={orig_lat},{orig_lon}&destination={dest_lat},{dest_lon}"
                 if waypoints:
@@ -212,7 +227,6 @@ if run_routing:
 if st.session_state.route_map is not None:
     st.success(st.session_state.route_message)
     
-    # Big Navigation Button
     if st.session_state.gmaps_link:
         st.markdown(
             f"""
