@@ -16,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for a clean, professional, mobile-friendly look
+# Custom CSS for a clean, professional look
 st.markdown("""
     <style>
     .main-header {
@@ -52,10 +52,10 @@ st.markdown("""
 
 # App Header
 st.markdown('<p class="main-header">🚌 Dublin Bus Safe Navigation</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-text">Bridge-safe routing for depot transfers and test driving.</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-text">Bridge-safe & wide-road routing for depot transfers and test driving.</p>', unsafe_allow_html=True)
 
 # Status Badge
-st.markdown('<div class="badge-safe">🛡️ Vehicle Profile: Double-Decker (Height Threshold: 4.6m)</div>', unsafe_allow_html=True)
+st.markdown('<div class="badge-safe">🛡️ Profile: Double-Decker (Max Height: 4.6m | Skinny Road Avoidance Active)</div>', unsafe_allow_html=True)
 
 if "route_map" not in st.session_state:
     st.session_state.route_map = None
@@ -83,20 +83,42 @@ def load_routing_graph():
     place_name = "County Dublin, Ireland"
     G = ox.graph_from_place(place_name, network_type="drive", retain_all=False)
     BUS_HEIGHT_THRESHOLD = 4.6 
+    
     for u, v, k, data in G.edges(keys=True, data=True):
+        # 1. Check Low Bridges (< 4.6m)
         max_height_tag = data.get('maxheight')
+        is_unsafe = False
         if max_height_tag:
             parsed_height = parse_height_to_meters(max_height_tag)
             if parsed_height is not None and parsed_height < BUS_HEIGHT_THRESHOLD:
-                data['unsafe_for_bus'] = True
-            else:
-                data['unsafe_for_bus'] = False
+                is_unsafe = True
+        
+        data['unsafe_for_bus'] = is_unsafe
+        
+        # 2. Assign Bus-Friendliness Weights to Avoid Skinny Roads
+        # Get road highway type (can be a string or list)
+        highway_type = data.get('highway', 'road')
+        if isinstance(highway_type, list):
+            highway_type = highway_type[0]
+            
+        length = data.get('length', 1.0)
+        
+        # Apply cost penalties to narrow road classes so the router prefers wider corridors
+        if highway_type in ['residential', 'living_street', 'service', 'track']:
+            # Heavy penalty for skinny residential or service lanes
+            data['bus_weight'] = length * 3.0
+        elif highway_type == 'unclassified':
+            # Moderate penalty for minor local roads
+            data['bus_weight'] = length * 1.8
         else:
-            data['unsafe_for_bus'] = False
+            # Preferred wide roads (primary, secondary, tertiary, trunk, motorway)
+            data['bus_weight'] = length * 1.0
+
+    # Filter out unsafe bridge edges
     safe_edges = [(u, v, k) for u, v, k, data in G.edges(keys=True, data=True) if not data.get('unsafe_for_bus', False)]
     return G.edge_subgraph(safe_edges).copy()
 
-with st.spinner("Loading County Dublin road network & checking low bridges..."):
+with st.spinner("Loading County Dublin road network & optimizing for bus dimensions..."):
     G_safe = load_routing_graph()
 
 POPULAR_LOCATIONS = {
@@ -166,7 +188,7 @@ with st.container():
 
     st.markdown("---")
     
-    run_routing = st.button("🚀 Calculate Bridge-Safe Route", type="primary", use_container_width=True)
+    run_routing = st.button("🚀 Calculate Bus-Safe Route", type="primary", use_container_width=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -178,37 +200,35 @@ if run_routing:
         st.error("⚠️ Please select or type a valid destination.")
     else:
         try:
-            with st.spinner("Calculating safe path avoiding low bridges..."):
+            with st.spinner("Calculating route avoiding low bridges and narrow estate lanes..."):
                 orig_node = ox.distance.nearest_nodes(G_safe, X=orig_lon, Y=orig_lat)
                 dest_node = ox.distance.nearest_nodes(G_safe, X=dest_lon, Y=dest_lat)
-                route = nx.shortest_path(G_safe, orig_node, dest_node, weight='length')
+                
+                # Using 'bus_weight' instead of 'length' to prioritize wide roads
+                route = nx.shortest_path(G_safe, orig_node, dest_node, weight='bus_weight')
                 
                 route_map = folium.Map(location=[orig_lat, orig_lon], zoom_start=13, tiles="Esri.WorldStreetMap")
                 route_coords = [(G_safe.nodes[node]['y'], G_safe.nodes[node]['x']) for node in route]
                 
-                folium.PolyLine(route_coords, color="#FF4B4B", weight=6, opacity=0.85, tooltip="Bridge-Safe Route").add_to(route_map)
+                folium.PolyLine(route_coords, color="#FF4B4B", weight=6, opacity=0.85, tooltip="Bus-Safe Route").add_to(route_map)
                 folium.Marker(route_coords[0], popup="Start Point", icon=folium.Icon(color="green", icon="play")).add_to(route_map)
                 folium.Marker(route_coords[-1], popup="Destination", icon=folium.Icon(color="blue", icon="stop")).add_to(route_map)
                 
-                # Smarter Waypoint Sampling: Filter out tight clusters to prevent Google Maps from looping
-                # Only pick points spaced at least ~1.5km apart along the route
+                # Smarter Waypoint Sampling for Google Maps
                 waypoints = []
                 last_lat, last_lon = orig_lat, orig_lon
                 
-                # Take samples along the route
                 sample_step = max(1, len(route) // 15)
                 for i in range(sample_step, len(route) - 1, sample_step):
                     node = route[i]
                     lat = G_safe.nodes[node]['y']
                     lon = G_safe.nodes[node]['x']
                     
-                    # Calculate rough distance in meters from the last waypoint
                     dist_approx = math.sqrt((lat - last_lat)**2 + (lon - last_lon)**2) * 111000
-                    if dist_approx > 1200:  # Only add waypoint if it's over 1.2km away from the previous one
+                    if dist_approx > 1200:
                         waypoints.append(f"{lat},{lon}")
                         last_lat, last_lon = lat, lon
                 
-                # Keep max 5 waypoints to avoid overloading Google Maps' router
                 waypoints = waypoints[:5]
                 
                 gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={orig_lat},{orig_lon}&destination={dest_lat},{dest_lon}"
@@ -217,7 +237,7 @@ if run_routing:
                 
                 st.session_state.route_map = route_map
                 st.session_state.gmaps_link = gmaps_url
-                st.session_state.route_message = f"Route successfully calculated! Total road segments verified: {len(route)}"
+                st.session_state.route_message = f"Route successfully calculated avoiding skinny roads! Total road segments verified: {len(route)}"
         except Exception as e:
             st.session_state.route_map = None
             st.session_state.gmaps_link = ""
@@ -232,7 +252,7 @@ if st.session_state.route_map is not None:
             f"""
             <a href="{st.session_state.gmaps_link}" target="_blank">
                 <button style="background-color:#10B981; color:white; padding:15px 20px; border:none; border-radius:8px; font-size:18px; font-weight:bold; cursor:pointer; width:100%; margin-bottom:15px;">
-                    🚗 Open Bridge-Safe Route in Google Maps
+                    🚗 Open Bus-Safe Route in Google Maps
                 </button>
             </a>
             """,
